@@ -13,6 +13,7 @@
 
 import { toast } from "sonner"
 import { formatUsd } from "@/shared/lib/format"
+import { sorobanRpc } from "../../lib/soroban/client"
 
 export type IncreaseOrderParams = {
   account: string

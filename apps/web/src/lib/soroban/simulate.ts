@@ -1,65 +1,105 @@
-import * as StellarSdk from "@stellar/stellar-sdk"
+import { Transaction, rpc as StellarRpc } from "@stellar/stellar-sdk"
+import { sorobanRpc } from "./client"
 
-const rpcUrl = import.meta.env.VITE_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org"
-export const rpc = new StellarSdk.rpc.Server(rpcUrl, { allowHttp: true })
+// Stroops to XLM conversion (1 XLM = 10,000,000 stroops)
+const STROOPS_PER_XLM = 10_000_000
 
-/**
- * Wraps rpc.simulateTransaction; throws with diagnostic event string on error.
- */
-export async function simulateTx(
-  tx: StellarSdk.Transaction | StellarSdk.FeeBumpTransaction
-): Promise<StellarSdk.rpc.Api.SimulateTransactionSuccessResponse> {
-  const simulation = await rpc.simulateTransaction(tx)
-
-  if (StellarSdk.rpc.Api.isSimulationError(simulation)) {
-    // Attempt to extract diagnostic events for better error messages
-    const events = simulation.events?.map(e => {
-      try {
-        return e.event().toXDR('base64')
-      } catch {
-        return "Unknown Event"
-      }
-    }).join(', ') || ''
-    
-    throw new Error(`Simulation failed: ${simulation.error}${events ? ` (Events: ${events})` : ''}`)
-  }
-
-  return simulation as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse
+export interface FeeEstimate {
+  /** Inclusion fee in XLM (formatted to 7 decimal places) */
+  inclusionFee: string
+  /** Resource fee in XLM (formatted to 7 decimal places) */
+  resourceFee: string
+  /** Total fee in XLM (formatted to 7 decimal places) */
+  total: string
 }
 
 /**
- * Calls simulateTx, extracts fee breakdown, returns amounts formatted in XLM (7dp).
+ * Simulates a Soroban transaction to get resource requirements
+ * Throws with diagnostic error if simulation fails
+ *
+ * @param tx - The transaction to simulate (can be Transaction object or XDR string)
+ * @returns Simulation response with resource estimates
+ * @throws Error with Soroban diagnostic event string on simulation failure
  */
-export async function estimateFee(
-  tx: StellarSdk.Transaction | StellarSdk.FeeBumpTransaction
-): Promise<{
-  inclusionFee: string
-  resourceFee: string
-  total: string
-}> {
-  const simulation = await simulateTx(tx)
+export async function simulateTx(
+  tx: Transaction | string,
+): Promise<StellarRpc.Api.SimulateTransactionResponse> {
+  const xdrString = typeof tx === "string" ? tx : tx.toXDR()
 
-  // simulation.minResourceFee is in stroops (1 XLM = 10,000,000 stroops)
-  const minResourceFeeStroops = BigInt(simulation.minResourceFee)
-  
-  // Base inclusion fee per operation (100 stroops by default)
-  let numOps = 1
-  if ('operations' in tx) {
-    numOps = tx.operations.length
-  } else if ('innerTransaction' in tx) {
-    numOps = (tx as StellarSdk.FeeBumpTransaction).innerTransaction.operations.length
+  try {
+    const simulation = await sorobanRpc.simulateTransaction(xdrString)
+
+    // Check if simulation failed
+    if (StellarRpc.Api.isSimulationError(simulation)) {
+      let errorMessage = "Transaction simulation failed"
+
+      // Extract diagnostic event string if available
+      if (simulation.simulationData?.error) {
+        errorMessage = `${errorMessage}: ${simulation.simulationData.error}`
+      }
+
+      throw new Error(errorMessage)
+    }
+
+    return simulation
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("simulation failed")) {
+      throw error
+    }
+    throw new Error(
+      `Failed to simulate transaction: ${error instanceof Error ? error.message : "Unknown error"}`,
+    )
   }
-  
-  const inclusionFeeStroops = BigInt(StellarSdk.BASE_FEE) * BigInt(numOps)
-  
-  const totalStroops = minResourceFeeStroops + inclusionFeeStroops
+}
 
-  // Format as XLM with 7 decimal places
-  const toXLM = (stroops: bigint) => (Number(stroops) / 10_000_000).toFixed(7)
+/**
+ * Estimates transaction fees from a simulation result
+ * Formats fees in XLM with 7 decimal places for UI display
+ *
+ * @param simulation - The simulation response from simulateTx
+ * @returns Fee estimates in XLM { inclusionFee, resourceFee, total }
+ */
+export function estimateFeeFromSimulation(
+  simulation: StellarRpc.Api.SimulateTransactionResponse,
+): FeeEstimate {
+  // Extract fees from simulation result
+  // The resultMetaXdr contains the fee information
+  const inclusionFeeStroops = simulation.inclusionFee ?? "0"
+  const resourceFeeStroops = simulation.resourceFee ?? "0"
+
+  // Convert stroops to XLM and format to 7 decimal places
+  const inclusionFeeXlm = formatStroopsToXlm(parseInt(inclusionFeeStroops))
+  const resourceFeeXlm = formatStroopsToXlm(parseInt(resourceFeeStroops))
+  const totalXlm = formatStroopsToXlm(
+    parseInt(inclusionFeeStroops) + parseInt(resourceFeeStroops),
+  )
 
   return {
-    inclusionFee: toXLM(inclusionFeeStroops),
-    resourceFee: toXLM(minResourceFeeStroops),
-    total: toXLM(totalStroops),
+    inclusionFee: inclusionFeeXlm,
+    resourceFee: resourceFeeXlm,
+    total: totalXlm,
   }
+}
+
+/**
+ * Simulates a transaction and estimates fees in one call
+ * Shorthand for common usage pattern
+ *
+ * @param tx - The transaction to simulate
+ * @returns Fee estimates in XLM
+ * @throws Error if simulation fails
+ */
+export async function estimateFee(tx: Transaction | string): Promise<FeeEstimate> {
+  const simulation = await simulateTx(tx)
+  return estimateFeeFromSimulation(simulation)
+}
+
+/**
+ * Formats stroops to XLM with 7 decimal places
+ * @param stroops - Amount in stroops
+ * @returns Formatted XLM amount as string with exactly 7 decimal places
+ */
+function formatStroopsToXlm(stroops: number): string {
+  const xlm = stroops / STROOPS_PER_XLM
+  return xlm.toFixed(7)
 }
