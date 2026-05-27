@@ -76,6 +76,18 @@ export function ConnectButton() {
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
+  useEffect(() => {
+    if (open) {
+      menuItemRefs.current[0]?.focus()
+      return
+    }
+
+    const active = document.activeElement as HTMLElement | null
+    if (active?.getAttribute("role") === "menuitem") {
+      ;(document.getElementById("wallet-account-trigger") as HTMLButtonElement | null)?.focus()
+    }
+  }, [open])
+
   if (status === "connecting") {
     return (
       <Button disabled variant="outline" className="h-9.5 px-4 text-[13.5px]">
