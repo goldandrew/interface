@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@workspace/ui/components/tabs"
+import { useMemo, useState } from "react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@workspace/ui/components/tabs"
 import { Input } from "@workspace/ui/components/input"
 import { Button } from "@workspace/ui/components/button"
 import { Slider } from "@workspace/ui/components/slider"
@@ -8,14 +8,15 @@ import { Badge } from "@workspace/ui/components/badge"
 import { useTradeState } from "../../hooks/useTradeState"
 import { useTokenPrices } from "../../hooks/useTokenPrices"
 import { useTradeFees } from "../../hooks/useTradeFees"
-import { TradeInfoRows } from "./TradeInfoRows"
-import { ConfirmationDialog } from "./ConfirmationDialog"
+import { useTokenBalances } from "../../../wallet/hooks/useTokenBalances"
 import {
-  sizeFromCollateralAndLeverage,
   estimateLiquidationPrice,
   formatUsd,
+  sizeFromCollateralAndLeverage,
 } from "../../lib/trade-math"
-import type { TradeMode, TradeType } from "../../hooks/useTradeState"
+import { TradeInfoRows } from "./TradeInfoRows"
+import { ConfirmationDialog } from "./ConfirmationDialog"
+import type { TradeType } from "../../hooks/useTradeState"
 
 export function TradePanel() {
   const trade = useTradeState()
@@ -36,7 +37,7 @@ export function TradePanel() {
   const collateralUsd = parseFloat(fromAmount || "0") * getMidPrice(collateralAddress)
   const sizeUsd = tradeFlags.isSwap ? collateralUsd : sizeFromCollateralAndLeverage(collateralUsd, leverage)
 
-  const fees = useTradeFees({ sizeUsd, marketAddress, isIncrease: true })
+  const fees = useTradeFees({ sizeUsd, marketAddress, isIncrease: true, tradeType })
 
   const liquidationPrice = useMemo(() => {
     if (!tradeFlags.isPosition || sizeUsd <= 0 || entryPrice <= 0) return 0
@@ -71,7 +72,7 @@ export function TradePanel() {
           {availableTradeModes.map((mode) => (
             <button
               key={mode}
-              onClick={() => setTradeMode(mode as TradeMode)}
+              onClick={() => setTradeMode(mode)}
               className={`rounded px-2 py-0.5 text-xs transition-colors ${
                 tradeMode === mode
                   ? "bg-muted font-medium text-foreground"
@@ -191,17 +192,30 @@ export function TradePanel() {
 function TradeInputs({ trade }: { trade: ReturnType<typeof useTradeState> }) {
   const { fromAmount, fromTokenAddress, toTokenAddress, tradeFlags, setFromAmount, switchTokens } = trade
   const { getMidPrice } = useTokenPrices()
+  const { data: balances } = useTokenBalances()
 
   const fromPrice = getMidPrice(fromTokenAddress)
   const fromUsd = parseFloat(fromAmount || "0") * fromPrice
+  const walletBalance = balances?.[fromTokenAddress]
 
   return (
     <div className="mt-3 space-y-2">
       {/* Pay */}
       <div className="space-y-1">
-        <label className="text-xs text-muted-foreground">
-          {tradeFlags.isSwap ? "Pay" : "Collateral"}
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-muted-foreground">
+            {tradeFlags.isSwap ? "Pay" : "Collateral"}
+          </label>
+          {walletBalance !== undefined && (
+            <span className="text-xs text-muted-foreground">
+              Balance:{" "}
+              <span className="font-mono font-medium text-foreground">
+                {walletBalance.toLocaleString(undefined, { maximumFractionDigits: 6 })}{" "}
+                {fromTokenAddress}
+              </span>
+            </span>
+          )}
+        </div>
         <div className="relative">
           <Input
             type="number"

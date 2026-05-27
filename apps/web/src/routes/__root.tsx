@@ -2,6 +2,9 @@ import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router"
 import { Toaster } from "sonner"
 import { AppProviders } from "@/app/providers"
 import appCss from "@workspace/ui/globals.css?url"
+import { ThemeProvider } from "../ui/theme-provider"
+import { NetworkMismatchBanner } from "../features/wallet/components/NetworkMismatchBanner"
+import { WalletProvider } from "../app/providers"
 
 
 // Update this to your production domain before going live.
