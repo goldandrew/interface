@@ -159,9 +159,25 @@ function WalletModal({
           </DialogDescription>
         </DialogHeader>
 
-        <Button type="button" className="w-full justify-center">
-          Freighter
-        </Button>
+        <div className="space-y-2">
+          {sortedWalletOptions.map((wallet) => {
+            const isAvailable = availableWalletIds.has(wallet.id)
+
+            return (
+              <Button
+                key={wallet.id}
+                type="button"
+                variant={isAvailable ? "default" : "outline"}
+                className="w-full justify-between"
+              >
+                <span>{wallet.name}</span>
+                <span className="text-xs opacity-75">
+                  {isAvailable ? "Detected" : "Not installed"}
+                </span>
+              </Button>
+            )
+          })}
+        </div>
       </DialogContent>
     </Dialog>
   )
