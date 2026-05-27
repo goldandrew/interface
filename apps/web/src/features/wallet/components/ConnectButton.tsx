@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ComponentProps } from "react"
 import { StellarWalletsKit } from "@creit.tech/stellar-wallets-kit/sdk"
-import { FREIGHTER_ID } from "@creit.tech/stellar-wallets-kit/modules/freighter.module"
-import { HANA_ID } from "@creit.tech/stellar-wallets-kit/modules/hana.module"
-import { XBULL_ID } from "@creit.tech/stellar-wallets-kit/modules/xbull.module"
+import { FREIGHTER_ID } from "@creit.tech/stellar-wallets-kit/modules/freighter"
+import { HANA_ID } from "@creit.tech/stellar-wallets-kit/modules/hana"
+import { XBULL_ID } from "@creit.tech/stellar-wallets-kit/modules/xbull"
 import { QRCodeSVG } from "qrcode.react"
 
 import { Button } from "@workspace/ui/components/button"
@@ -15,6 +15,7 @@ import {
 } from "@workspace/ui/components/dialog"
 import { cn } from "@workspace/ui/lib/utils"
 
+import { AccountBadge } from "./AccountBadge"
 import { createSep7ConnectUri, createSep7TransactionUri } from "../lib/sep7"
 import { useWalletStore } from "../store/wallet-store"
 
@@ -55,7 +56,7 @@ export function ConnectButton({ className, ...props }: ConnectButtonProps) {
   const isConnecting = status === "connecting"
 
   if (status === "connected" && address) {
-    return <AccountBadge address={address} className={className} {...props} />
+    return <AccountBadge address={address} className={typeof className === "string" ? className : undefined} {...props} />
   }
 
   return (
@@ -75,28 +76,6 @@ export function ConnectButton({ className, ...props }: ConnectButtonProps) {
 
       <WalletModal open={isWalletModalOpen} onOpenChange={setIsWalletModalOpen} />
     </>
-  )
-}
-
-function AccountBadge({
-  address,
-  className,
-  ...props
-}: {
-  address: string
-  className?: string
-} & ConnectButtonProps) {
-  return (
-    <Button
-      {...props}
-      type="button"
-      variant="outline"
-      aria-label={`Connected wallet ${formatAddress(address)}`}
-      className={cn("w-full justify-start gap-2 sm:w-auto", className)}
-    >
-      <span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" />
-      <span className="font-mono">{formatAddress(address)}</span>
-    </Button>
   )
 }
 
@@ -309,7 +288,7 @@ function Spinner() {
   )
 }
 
-function formatAddress(address: string) {
+export function formatAddress(address: string) {
   if (address.length <= 12) {
     return address
   }
