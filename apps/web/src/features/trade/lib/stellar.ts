@@ -183,12 +183,34 @@ export async function createSwapOrder(params: SwapOrderParams): Promise<string> 
 }
 
 /** Cancel a pending limit/trigger order */
-export async function cancelOrder(_account: string, _orderKey: string): Promise<string> {
-  const toastId = toast.loading("Cancelling order…")
-  await fakeTxDelay(800)
+export async function cancelOrder(account: string, orderKey: OrderKey): Promise<string> {
+  if (!isValidAccount(account)) {
+    throw new Error("Connect your wallet before cancelling an order.")
+  }
 
-  toast.success("Order cancelled", { id: toastId })
-  return "DUMMY_TX_HASH"
+  const toastId = toast.loading("Cancelling order…")
+
+  try {
+    const tx = await buildCancelOrderTransaction(account, orderKey)
+    const signedXdr = await prepareAndSign(tx, walletKit, NETWORK.networkPassphrase)
+    const { hash } = await sendAndPoll(signedXdr)
+
+    await queryClient.invalidateQueries({ queryKey: queryKeys.orders(CHAIN_ID, account) })
+
+    toast.success("Order cancelled", {
+      id: toastId,
+      description: `Tx: ${hash.slice(0, 8)}…`,
+      action: {
+        label: "View on Stellar Expert",
+        onClick: () => window.open(explorerTxUrl(hash), "_blank", "noopener,noreferrer"),
+      },
+    })
+
+    return hash
+  } catch (error) {
+    toast.error(parseSorobanError(error), { id: toastId })
+    throw error
+  }
 }
 
 /** Claim accrued funding fees */
