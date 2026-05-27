@@ -267,13 +267,16 @@ function WalletModal({
                   : "Scan to connect from a mobile wallet."}
               </p>
             </div>
-            <Button asChild type="button" variant="outline" size="sm">
-              <a href={sep7Uri}>Scan to connect</a>
-            </Button>
+            <a
+              className="inline-flex h-6 shrink-0 items-center justify-center rounded-md border border-border px-2 text-xs font-medium transition-colors hover:bg-input/50"
+              href={sep7Uri}
+            >
+              Scan to connect
+            </a>
           </div>
 
           <div className="flex justify-center rounded-md bg-white p-4">
-            <QRCodeSVG value={sep7Uri} size={168} />
+            <QRCodeSVG value={sep7Uri} size={168} level="M" />
           </div>
         </div>
       </DialogContent>
