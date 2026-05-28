@@ -3,7 +3,7 @@ import { queryClient } from "@/app/providers/QueryProvider"
 import { CONTRACTS } from "@/app/config/contracts"
 import { NETWORK } from "@/app/config/network"
 import { parseSorobanError } from "@/lib/soroban/errors"
-import { queryKeys } from "@/features/trade/lib/query-keys"
+import { queryKeys } from "@/shared/lib/query-keys"
 import { submitTx } from "@/shared/hooks/useTxSubmit"
 import { walletKit } from "@/features/wallet/lib/wallet-kit"
 import { sorobanRpc } from "@/lib/soroban/client"
@@ -46,6 +46,7 @@ export async function createDeposit(params: CreateDepositParams): Promise<string
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.trade.tokenBalances(CHAIN_ID, params.account) })
         queryClient.invalidateQueries({ queryKey: ["tokenBalances", params.account] })
+        queryClient.invalidateQueries({ queryKey: queryKeys.earn.glvVaultData(params.glvAddress, params.account) })
       },
       onError: parseSorobanError,
     },
@@ -69,6 +70,7 @@ export async function createWithdrawal(params: CreateWithdrawalParams): Promise<
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.trade.tokenBalances(CHAIN_ID, params.account) })
         queryClient.invalidateQueries({ queryKey: ["tokenBalances", params.account] })
+        queryClient.invalidateQueries({ queryKey: queryKeys.earn.glvVaultData(params.glvAddress, params.account) })
       },
       onError: parseSorobanError,
     },
