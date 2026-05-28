@@ -27,6 +27,7 @@ export const queryKeys = {
     feeConfig:     (chainId: string, marketAddress: string)        => ["trade", "feeConfig", chainId, marketAddress] as const,
     tradeHistory:  (chainId: string, addr: string, page: number)   => ["trade", "history", chainId, addr, page] as const,
     tokenBalances: (chainId: string, addr: string)                 => ["trade", "tokenBalances", chainId, addr] as const,
+    openInterest:  (marketAddress: string)                         => ["trade", "openInterest", marketAddress] as const,
   },
 
   earn: {
