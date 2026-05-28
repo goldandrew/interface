@@ -72,6 +72,11 @@ export function OrdersList() {
                   >
                     {o.isLong ? "Long" : "Short"}
                   </Badge>
+                  {o.status === "frozen" && (
+                    <Badge variant="secondary" className="bg-amber-500/10 text-amber-600">
+                      Frozen
+                    </Badge>
+                  )}
                 </div>
               </td>
               <td className="px-4 py-2 text-muted-foreground">{o.orderType}</td>
