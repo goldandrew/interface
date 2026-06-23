@@ -1,92 +1,22 @@
-import { Account, Credit, Debit, Payment, Transfer } from "../types";
-import {
-  StellarOperation,
-  StellarEffect,
-  SorobanEvent,
-} from "@subql/types-stellar";
-import {
-  AccountCredited,
-  AccountDebited,
-} from "@stellar/stellar-sdk/lib/horizon/types/effects";
-import type { Horizon } from "@stellar/stellar-sdk";
+import { MarketTokenTransfer } from "../types";
+import { SorobanEvent } from "@subql/types-stellar";
 import { xdr } from "@stellar/stellar-sdk";
 import { Address, scValToBigInt } from "@stellar/stellar-base";
 
-export async function handleOperation(
-  op: StellarOperation<Horizon.HorizonApi.PaymentOperationResponse>,
-): Promise<void> {
-  logger.info(`Indexing operation ${op.id}, type: ${op.type}`);
-
-  const fromAccount = await checkAndGetAccount(op.from, op.ledger!.sequence);
-  const toAccount = await checkAndGetAccount(op.to, op.ledger!.sequence);
-
-  const payment = Payment.create({
-    id: op.id,
-    fromId: fromAccount.id,
-    toId: toAccount.id,
-    txHash: op.transaction_hash,
-    amount: op.amount,
-  });
-
-  fromAccount.lastSeenLedger = op.ledger!.sequence;
-  toAccount.lastSeenLedger = op.ledger!.sequence;
-  await Promise.all([fromAccount.save(), toAccount.save(), payment.save()]);
-}
-
-export async function handleCredit(
-  effect: StellarEffect<AccountCredited>,
-): Promise<void> {
-  logger.info(`Indexing effect ${effect.id}, type: ${effect.type}`);
-
-  const account = await checkAndGetAccount(
-    effect.account,
-    effect.ledger!.sequence,
-  );
-
-  const credit = Credit.create({
-    id: effect.id,
-    accountId: account.id,
-    amount: effect.amount,
-  });
-
-  account.lastSeenLedger = effect.ledger!.sequence;
-  await Promise.all([account.save(), credit.save()]);
-}
-
-export async function handleDebit(
-  effect: StellarEffect<AccountDebited>,
-): Promise<void> {
-  logger.info(`Indexing effect ${effect.id}, type: ${effect.type}`);
-
-  const account = await checkAndGetAccount(
-    effect.account,
-    effect.ledger!.sequence,
-  );
-
-  const debit = Debit.create({
-    id: effect.id,
-    accountId: account.id,
-    amount: effect.amount,
-  });
-
-  account.lastSeenLedger = effect.ledger!.sequence;
-  await Promise.all([account.save(), debit.save()]);
-}
-
 export async function handleEvent(event: SorobanEvent): Promise<void> {
   logger.info(
-    `New transfer event found at block ${event.ledger!.sequence.toString()}`,
+    `New SO4 contract event found at block ${event.ledger!.sequence.toString()}`,
   );
 
-  // Get data from the event
-  // The transfer event has the following payload \[env, from, to\]
+  // Token and market-token transfers use topic shape [event_name, from, to].
+  // Amounts are stored as strings to preserve protocol-scale precision.
   if (event.topic.length < 3) {
     logger.info(`Event ${event.id} does not match transfer topic shape, skipping`);
     return;
   }
 
   const {
-    topic: [env, from, to],
+    topic: [eventName, from, to],
   } = event;
 
   // Check if the topic values are actually addresses before decoding
@@ -111,14 +41,8 @@ export async function handleEvent(event: SorobanEvent): Promise<void> {
     return;
   }
 
-  const fromAccount = await checkAndGetAccount(
-    decodeAddress(from),
-    event.ledger!.sequence,
-  );
-  const toAccount = await checkAndGetAccount(
-    decodeAddress(to),
-    event.ledger!.sequence,
-  );
+  const fromAccount = decodeAddress(from);
+  const toAccount = decodeAddress(to);
 
   // Check if event.value is an integer type before converting
   const valueType = event.value.switch().name;
@@ -128,36 +52,22 @@ export async function handleEvent(event: SorobanEvent): Promise<void> {
     return;
   }
 
-  // Create the new transfer entity
   const contractAddress = event.contractId ? Buffer.from(event.contractId.contractId()).toString('hex') : '';
-  const transfer = Transfer.create({
+  const transactionHash = getTransactionHash(event);
+  const transfer = MarketTokenTransfer.create({
     id: event.id,
+    contractAddress,
+    from: fromAccount.toLowerCase(),
+    to: toAccount.toLowerCase(),
+    account: fromAccount.toLowerCase(),
+    transferType: decodeTopicName(eventName),
+    amount: scValToBigInt(event.value).toString(),
     ledger: event.ledger!.sequence,
-    date: new Date(event.ledgerClosedAt),
-    contract: contractAddress,
-    fromId: fromAccount.id,
-    toId: toAccount.id,
-    value: scValToBigInt(event.value),
+    timestamp: new Date(event.ledgerClosedAt),
+    transactionHash,
   });
 
-  fromAccount.lastSeenLedger = event.ledger!.sequence;
-  toAccount.lastSeenLedger = event.ledger!.sequence;
-  await Promise.all([fromAccount.save(), toAccount.save(), transfer.save()]);
-}
-
-async function checkAndGetAccount(
-  id: string,
-  ledgerSequence: number,
-): Promise<Account> {
-  let account = await Account.get(id.toLowerCase());
-  if (!account) {
-    // We couldn't find the account
-    account = Account.create({
-      id: id.toLowerCase(),
-      firstSeenLedger: ledgerSequence,
-    });
-  }
-  return account;
+  await transfer.save();
 }
 
 // scValToNative not works, temp solution
@@ -175,4 +85,25 @@ function decodeAddress(scVal: xdr.ScVal): string {
   }
 
   throw new Error(`Unknown address type: ${addressType}`);
+}
+
+function decodeTopicName(scVal: xdr.ScVal): string {
+  const valueType = scVal.switch().name;
+  if (valueType === "scvSymbol") {
+    return scVal.sym().toString();
+  }
+  if (valueType === "scvString") {
+    return scVal.str().toString();
+  }
+  return valueType;
+}
+
+function getTransactionHash(event: SorobanEvent): string | undefined {
+  const maybeEvent = event as unknown as {
+    transactionHash?: string;
+    txHash?: string;
+    transaction?: { hash?: string };
+  };
+
+  return maybeEvent.transactionHash ?? maybeEvent.txHash ?? maybeEvent.transaction?.hash;
 }
