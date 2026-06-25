@@ -236,9 +236,9 @@ describe("useKeyboardShortcut", () => {
         if (eventName === "keydown") {
           const wrappedHandler = (e: KeyboardEvent) => {
             events.push(e)
-            return handler(e)
+            return (handler as EventListener)(e as any)
           }
-          return originalAddEventListener.call(document, eventName, wrappedHandler)
+          return originalAddEventListener.call(document, eventName, wrappedHandler as any)
         }
         return originalAddEventListener.call(document, eventName, handler)
       },
