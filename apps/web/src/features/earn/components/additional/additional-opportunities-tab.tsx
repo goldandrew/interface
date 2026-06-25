@@ -3,8 +3,9 @@ import { Link } from "@tanstack/react-router"
 import { Button } from "@workspace/ui/components/button"
 import { Skeleton } from "@workspace/ui/components/skeleton"
 import { useUserSO4Stats } from "../../hooks/use-earn-data"
-import { vestEsSO4, compoundRewards } from "../../lib/earn"
+import { compoundRewards, vestEsSO4 } from "../../lib/earn"
 import { formatToken } from "@/shared/lib/format"
+import { useWalletStore } from "@/features/wallet/store/wallet-store"
 
 
 
@@ -58,31 +59,33 @@ function StatRow({
 
 export function AdditionalOpportunitiesTab() {
   const { data: so4Stats, isLoading } = useUserSO4Stats()
+  const { address } = useWalletStore()
   const [vestPending, setVestPending] = useState(false)
   const [compoundPending, setCompoundPending] = useState(false)
 
   async function handleVest() {
+    if (!address) return
     setVestPending(true)
     try {
       // TODO: open vesting modal with amount input + confirmation
-      await vestEsSO4("DUMMY_ACCOUNT", so4Stats?.esSO4Balance ?? 0)
+      await vestEsSO4(address, so4Stats.esSO4Balance)
     } finally {
       setVestPending(false)
     }
   }
 
   async function handleCompound() {
+    if (!address) return
     setCompoundPending(true)
     try {
-      // TODO: pass real wallet account from wallet context
-      await compoundRewards("DUMMY_ACCOUNT")
+      await compoundRewards(address)
     } finally {
       setCompoundPending(false)
     }
   }
 
-  const hasEsSO4 = (so4Stats?.esSO4Balance ?? 0) > 0
-  const hasMultiplierPoints = (so4Stats?.multiplierPoints ?? 0) > 0
+  const hasEsSO4 = so4Stats.esSO4Balance > 0
+  const hasMultiplierPoints = so4Stats.multiplierPoints > 0
 
   return (
     <div className="space-y-4">
@@ -105,7 +108,7 @@ export function AdditionalOpportunitiesTab() {
         <div className="flex flex-wrap gap-x-8 gap-y-3">
           <StatRow
             label="esSO4 balance"
-            value={formatToken(so4Stats?.esSO4Balance ?? 0, "esSO4", { minDecimals: 2 })}
+            value={formatToken(so4Stats.esSO4Balance, "esSO4", { minDecimals: 2 })}
             isLoading={isLoading}
           />
           <StatRow label="Vesting duration" value="12 months" />
@@ -131,7 +134,7 @@ export function AdditionalOpportunitiesTab() {
         <div className="flex flex-wrap gap-x-8 gap-y-3">
           <StatRow
             label="Multiplier Points"
-            value={formatToken(so4Stats?.multiplierPoints ?? 0, "MP", { minDecimals: 2 })}
+            value={formatToken(so4Stats.multiplierPoints, "MP", { minDecimals: 2 })}
             isLoading={isLoading}
           />
           <StatRow label="Boost cap" value="100% of base APR" />

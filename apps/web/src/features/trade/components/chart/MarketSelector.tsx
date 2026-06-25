@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from "react"
-import { MARKETS, type Market } from "../../data/markets"
+import { useEffect, useRef, useState } from "react"
 import { useTokenPrices } from "../../hooks/useTokenPrices"
 import { usePriceDelta24h } from "../../hooks/usePriceDelta24h"
+import { useMarkets } from "../../hooks/useMarkets"
+import type { Market } from "../../hooks/useMarkets"
 import { formatUsd } from "@/shared/lib/format"
 
 type Props = {
@@ -61,9 +62,11 @@ export function MarketSelector({ symbol, onSelect }: Props) {
   const [search, setSearch] = useState("")
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const activeMarket = MARKETS.find((m) => m.indexTokenAddress === symbol)
+  const { markets } = useMarkets()
 
-  const filtered = MARKETS.filter((m) =>
+  const activeMarket = markets.find((m) => m.indexTokenAddress === symbol)
+
+  const filtered = markets.filter((m) =>
     search.trim() === ""
       ? true
       : m.name.toLowerCase().includes(search.toLowerCase()) ||

@@ -2,9 +2,9 @@ import { useState } from "react"
 import { cn } from "@workspace/ui/lib/utils"
 import { Button } from "@workspace/ui/components/button"
 import { Skeleton } from "@workspace/ui/components/skeleton"
-import { useUserGmPositions, useUserGlvPositions, useUserSO4Stats } from "../../hooks/use-earn-data"
-import { withdrawGM, withdrawGLV, unstakeSO4 } from "../../lib/earn"
-import { formatUsd, formatPct } from "@/shared/lib/format"
+import { useUserGlvPositions, useUserGmPositions, useUserSO4Stats } from "../../hooks/use-earn-data"
+import { unstakeSO4, withdrawGLV, withdrawGM } from "../../lib/earn"
+import { formatPct, formatUsd } from "@/shared/lib/format"
 
 
 
@@ -37,10 +37,13 @@ function EmptyState() {
         <WalletEmptyIcon />
       </div>
       <div>
-        <p className="text-sm font-medium text-foreground/80">No assets yet</p>
+        <p className="text-sm font-medium text-foreground/80">You have no deposits</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          See recommended section above to start
+          Start earning by depositing into a pool
         </p>
+        <a href="#browse-pools" className="text-xs text-primary hover:text-primary/80 font-medium mt-2 inline-block">
+          Browse pools →
+        </a>
       </div>
     </div>
   )
@@ -88,7 +91,7 @@ export function AssetsList() {
   const [pending, setPending] = useState<string | null>(null)
 
   const isLoading = gmLoading || glvLoading || so4Loading
-  const hasSO4 = (so4Stats?.stakedAmount ?? 0) > 0
+  const hasSO4 = so4Stats.stakedAmount > 0
   const hasAny = hasSO4 || gmPositions.length > 0 || glvPositions.length > 0
 
   async function runAction(key: string, fn: () => Promise<unknown>) {
@@ -131,7 +134,7 @@ export function AssetsList() {
                   </td>
                   <td className="px-5 py-3.5 text-right font-mono text-muted-foreground">—</td>
                   <td className="px-5 py-3.5 text-right font-mono">
-                    {formatUsd(so4Stats?.stakedValueUsd ?? 0)}
+                    {formatUsd(so4Stats.stakedValueUsd)}
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <Button
@@ -140,7 +143,7 @@ export function AssetsList() {
                       disabled={pending === "so4"}
                       onClick={() =>
                         void runAction("so4", () =>
-                          unstakeSO4("DUMMY_ACCOUNT", so4Stats?.stakedAmount ?? 0),
+                          unstakeSO4("DUMMY_ACCOUNT", so4Stats.stakedAmount),
                         )
                       }
                     >

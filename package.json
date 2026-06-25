@@ -7,9 +7,16 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "format": "turbo format",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "test:e2e": "playwright test",
+    "contracts:gen:all": "bun run scripts/generate-bindings.ts",
+    "indexer:codegen": "bun run --cwd apps/s03-indexer codegen",
+    "indexer:build": "bun run --cwd apps/s03-indexer build",
+    "indexer:dev": "bun run --cwd apps/s03-indexer dev",
+    "indexer:start": "bun run --cwd apps/s03-indexer start"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "turbo": "^2.8.17",

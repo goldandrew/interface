@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Button } from "@workspace/ui/components/button"
 import { ThemeToggle } from "./theme-toggle"
+import { ConnectButton } from "@/features/wallet/components/ConnectButton"
 
 function Logo() {
   return (
@@ -39,7 +40,7 @@ function Logo() {
         </svg>
       </span>
       <span className="font-mono-num text-[17px] font-medium tracking-[0.02em] text-foreground">
-        so4<span className="text-muted-foreground">.market</span>
+        so4<span className="text-muted-foreground max-[380px]:hidden">.market</span>
       </span>
     </Link>
   )
@@ -53,13 +54,27 @@ const LANDING_LINKS = [
   { label: "Governance", href: "#" },
 ]
 
-const APP_LINKS: Array<{ label: string; to: "/trade" | "/earn" | "/referrals" | null }> = [
+const APP_LINKS: Array<{ label: string; to: "/trade" | "/pools" | "/earn" | "/referrals" | "/faucet" | null }> = [
   { label: "Trade", to: "/trade" },
+  { label: "Pools", to: "/pools" },
   { label: "Earn", to: "/earn" },
   { label: "Referrals", to: "/referrals" },
+  { label: "Faucet", to: "/faucet" },
   { label: "Stats", to: null },
   { label: "Docs", to: null },
 ]
+
+const desktopAppLinkClass =
+  "relative inline-flex h-8 items-center rounded-md px-2 text-[13.5px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+
+const desktopAppLinkActiveClass =
+  "relative inline-flex h-8 items-center rounded-md bg-primary/10 px-2 text-[13.5px] font-medium text-foreground after:absolute after:inset-x-2 after:-bottom-[13px] after:h-0.5 after:rounded-full after:bg-primary"
+
+const mobileAppLinkClass =
+  "block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+
+const mobileAppLinkActiveClass =
+  "block rounded-md bg-primary/10 px-3 py-2 text-sm font-medium text-foreground ring-1 ring-primary/20"
 
 type Props = {
   variant: "landing" | "app"
@@ -72,11 +87,13 @@ export function Navbar({ variant }: Props) {
   return (
     <nav className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-md backdrop-saturate-150">
       <div
-        className={`mx-auto flex items-center justify-between px-4 sm:px-6 lg:px-8 ${
+        className={`mx-auto flex min-w-0 items-center justify-between gap-2 px-3 sm:px-6 lg:px-8 ${
           isApp ? "h-14 max-w-full" : "h-16 max-w-330"
         }`}
       >
-        <Logo />
+        <div className="min-w-0 shrink">
+          <Logo />
+        </div>
 
         {/* Desktop links */}
         <ul className="hidden items-center gap-7 md:flex">
@@ -86,8 +103,9 @@ export function Navbar({ variant }: Props) {
                   {to ? (
                     <Link
                       to={to}
-                      className="text-[13.5px] text-muted-foreground transition-colors hover:text-foreground"
-                      activeProps={{ className: "text-[13.5px] text-foreground" }}
+                      className={desktopAppLinkClass}
+                      activeOptions={{ exact: true }}
+                      activeProps={{ className: desktopAppLinkActiveClass }}
                     >
                       {label}
                     </Link>
@@ -111,11 +129,9 @@ export function Navbar({ variant }: Props) {
         </ul>
 
         {/* Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
           <ThemeToggle />
-          <Button variant="outline" className="h-9.5 px-4 text-[13.5px]">
-            Connect
-          </Button>
+          <ConnectButton />
           {!isApp && (
             <Button
               variant="default"
@@ -173,7 +189,9 @@ export function Navbar({ variant }: Props) {
                     {to ? (
                       <Link
                         to={to}
-                        className="block rounded py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                        className={mobileAppLinkClass}
+                        activeOptions={{ exact: true }}
+                        activeProps={{ className: mobileAppLinkActiveClass }}
                         onClick={() => setMobileOpen(false)}
                       >
                         {label}

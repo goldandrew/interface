@@ -1,52 +1,149 @@
-import { toast } from "sonner"
-import { sorobanRpc } from "../../lib/soroban/client"
+import { queryClient } from "@/app/providers/QueryProvider"
+import { NETWORK } from "@/app/config/network"
+import { prepareAndSign } from "@/lib/soroban/tx-builder"
+import {
+  affiliateCodeStorageKey,
+  buildClaimRebatesTransaction,
+  buildRegisterCodeTransaction,
+  buildSetTraderReferralCodeTransaction,
+  mapContractError,
+  parseSorobanError,
+  referralPromptStorageKey,
+} from "@/lib/contracts"
+import { submitTx } from "@/shared/hooks/useTxSubmit"
+import { queryKeys } from "@/shared/lib/query-keys"
+import { walletKit } from "@/features/wallet/lib/wallet-kit"
 
-function fakeTxDelay(ms = 1500): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms))
+function isValidAccount(account: string): boolean {
+  return /^G[A-Z2-7]{55}$/.test(account)
 }
 
-export async function setTraderReferralCode(_account: string, code: string): Promise<string> {
-  // TODO: Call ReferralsRouter.setTraderReferralCodeByUser(bytes32(code)) on Soroban
-  //   1. Verify code exists via ReferralsReader.getCodeOwner(code) — must not be zero address
-  //   2. Build and sign transaction
-  //   3. Submit and poll for SUCCESS
-  const toastId = toast.loading(`Joining with code "${code}"…`)
-  await fakeTxDelay()
-  toast.success(`Referral code "${code}" applied`, {
-    id: toastId,
-    description: "5% fee discount is now active on your trades",
-  })
-  return "DUMMY_TX_HASH"
+async function invalidateReferralQueries(account: string, code?: string | null): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.referrals.code(account) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.referrals.tier(account) }),
+    queryClient.invalidateQueries({ queryKey: ["referrals", "trader-stats"] }),
+    queryClient.invalidateQueries({ queryKey: ["referrals", "distributions"] }),
+    ...(code
+      ? [queryClient.invalidateQueries({ queryKey: queryKeys.referrals.stats(code) })]
+      : []),
+  ])
 }
 
-export async function createAffiliateCode(_account: string, code: string): Promise<string> {
-  // TODO: Call ReferralsRouter.registerCode(bytes32(code)) on Soroban
-  //   1. Check code availability: ReferralsReader.getCodeOwner(code) === zero address
-  //   2. Build registerCode instruction, sign, submit
-  //   3. Poll until SUCCESS — code becomes active immediately
-  const toastId = toast.loading(`Registering code "${code}"…`)
-  await fakeTxDelay()
-  toast.success(`Code "${code}" registered!`, {
-    id: toastId,
-    description: "Share your code to start earning commissions",
-  })
-  return "DUMMY_TX_HASH"
+export async function setTraderReferralCode(account: string, code: string): Promise<string> {
+  if (!isValidAccount(account)) {
+    throw new Error("Connect your wallet before applying a referral code.")
+  }
+
+  const normalized = code.toUpperCase().trim()
+
+  return submitTx(
+    async () => {
+      const tx = await buildSetTraderReferralCodeTransaction(account, normalized)
+      return prepareAndSign(tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage: `Joining with code "${normalized}"...`,
+      successMessage: `Referral code "${normalized}" applied`,
+      successDescription: (hash) => `Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: async () => {
+        if (typeof window !== "undefined") {
+          localStorage.setItem(referralPromptStorageKey(account), "1")
+        }
+        await invalidateReferralQueries(account)
+      },
+      onError: (error) => mapContractError(error) || parseSorobanError(error),
+    },
+  )
 }
 
-export async function claimDistribution(_account: string, _epochId: string): Promise<string> {
-  // TODO: Call RewardDistributor.claimForEpoch(epochId) on Soroban
-  //   Transfers USDC + esSO4 affiliate rewards to the connected wallet
-  const toastId = toast.loading("Claiming distribution…")
-  await fakeTxDelay(1000)
-  toast.success("Distribution claimed", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+/** Alias used by the trade-panel first-trade referral prompt (#133). */
+export const applyReferralCode = setTraderReferralCode
+
+export async function createAffiliateCode(account: string, code: string): Promise<string> {
+  if (!isValidAccount(account)) {
+    throw new Error("Connect your wallet before creating a referral code.")
+  }
+
+  const normalized = code.toUpperCase().trim()
+  const validationError = validateReferralCode(code)
+  if (validationError) {
+    throw new Error(validationError)
+  }
+
+  return submitTx(
+    async () => {
+      const tx = await buildRegisterCodeTransaction(account, normalized)
+      return prepareAndSign(tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage: `Registering code "${normalized}"...`,
+      successMessage: `Code "${normalized}" registered!`,
+      successDescription: (hash) => `Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: async () => {
+        if (typeof window !== "undefined") {
+          localStorage.setItem(affiliateCodeStorageKey(account), normalized)
+        }
+        await invalidateReferralQueries(account, normalized)
+      },
+      onError: (error) => mapContractError(error) || parseSorobanError(error),
+    },
+  )
+}
+
+export async function claimRebates(account: string, epochIds: Array<string>): Promise<string> {
+  if (!isValidAccount(account)) {
+    throw new Error("Connect your wallet before claiming rebates.")
+  }
+  if (epochIds.length === 0) {
+    throw new Error("No rebate epochs selected.")
+  }
+
+  return submitTx(
+    async () => {
+      const tx = await buildClaimRebatesTransaction(account, epochIds)
+      return prepareAndSign(tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage:
+        epochIds.length === 1
+          ? "Claiming rebate..."
+          : `Claiming ${epochIds.length} rebates...`,
+      successMessage: "Rebates claimed",
+      successDescription: (hash) => `Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: async () => {
+        await invalidateReferralQueries(account)
+        await queryClient.invalidateQueries({ queryKey: ["referrals", "stats"] })
+      },
+      onError: (error) => mapContractError(error) || parseSorobanError(error),
+    },
+  )
+}
+
+export async function claimDistribution(account: string, epochId: string): Promise<string> {
+  return claimRebates(account, [epochId])
 }
 
 export function validateReferralCode(code: string): string | null {
   const upper = code.toUpperCase().trim()
   if (!upper) return "Code is required"
   if (upper.length < 3) return "Minimum 3 characters"
-  if (upper.length > 16) return "Maximum 16 characters"
+  if (upper.length > 20) return "Maximum 20 characters"
   if (!/^[A-Z0-9_]+$/.test(upper)) return "Only letters, numbers, and underscores allowed"
   return null
+}
+
+export function hasCompletedReferralPrompt(account: string): boolean {
+  if (typeof window === "undefined") return true
+  return localStorage.getItem(referralPromptStorageKey(account)) === "1"
+}
+
+export function markReferralPromptComplete(account: string): void {
+  if (typeof window === "undefined") return
+  localStorage.setItem(referralPromptStorageKey(account), "1")
+}
+
+export function readStoredAffiliateCode(account: string): string | null {
+  if (typeof window === "undefined") return null
+  return localStorage.getItem(affiliateCodeStorageKey(account))
 }

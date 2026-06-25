@@ -1,108 +1,259 @@
 import { toast } from "sonner"
-import { sorobanRpc } from "../../lib/soroban/client"
+import { GLV_VAULTS, GM_POOLS } from "../data/pools"
+import { submitTx } from "@/shared/hooks/useTxSubmit"
+import { NETWORK } from "@/app/config/network"
+import { queryClient } from "@/app/providers/QueryProvider"
+import { prepareAndSign } from "@/lib/soroban/tx-builder"
+import {
+  buildClaimRewardsTransaction,
+  buildCompoundTransaction,
+  buildCreateDepositTransaction,
+  buildCreateWithdrawalTransaction,
+  buildDepositForVestingTransaction,
+  buildStakeSO4Transaction,
+  buildUnstakeSO4Transaction,
+  parseSorobanError,
+} from "@/lib/contracts"
+import { walletKit } from "@/features/wallet/lib/wallet-kit"
+import { queryKeys } from "@/shared/lib/query-keys"
+import { toSorobanAmount } from "@/shared/lib/bignum"
+import {
+  createDeposit as createGlvDeposit,
+  createWithdrawal as createGlvWithdrawal,
+} from "@/lib/glv-router-client"
 
-function fakeTxDelay(ms = 1500): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms))
+const SO4_DECIMALS = 7
+const GM_TOKEN_DECIMALS = 7
+const GLV_TOKEN_DECIMALS = 7
+
+function isValidAccount(account: string): boolean {
+  return /^G[A-Z2-7]{55}$/.test(account)
 }
 
-export async function stakeSO4(_account: string, _amountSO4: number): Promise<string> {
-  // TODO: Call StakingRouter.stakeSO4(amount) on Soroban:
-  //   1. Build stakeXDR via contract client
-  //   2. wallet.signTransaction(tx)
-  //   3. sorobanClient.sendTransaction(signedTx)
-  //   4. poll sorobanClient.getTransaction(hash) until SUCCESS/FAILED
-  const toastId = toast.loading("Staking SO4…")
-  await fakeTxDelay()
-  toast.success("SO4 staked successfully", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+async function invalidateStakingQueries(account: string): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.earn.stakingInfo(account) }),
+    queryClient.invalidateQueries({ queryKey: ["tokenBalances", account] }),
+  ])
 }
 
-export async function unstakeSO4(_account: string, _amountSO4: number): Promise<string> {
-  // TODO: Call StakingRouter.unstakeSO4(amount) on Soroban
-  const toastId = toast.loading("Unstaking SO4…")
-  await fakeTxDelay()
-  toast.success("SO4 unstaked successfully", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+export async function stakeSO4(account: string, amountSO4: number): Promise<string> {
+  if (!isValidAccount(account)) throw new Error("Connect your wallet before staking.")
+  if (!(amountSO4 > 0)) throw new Error("Enter an amount of SO4 to stake.")
+
+  const amount = toSorobanAmount(amountSO4, SO4_DECIMALS)
+
+  return submitTx(
+    async () => {
+      const tx = await buildStakeSO4Transaction(account, amount)
+      return prepareAndSign(tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage: `Staking ${amountSO4} SO4...`,
+      successMessage: "SO4 staked successfully",
+      successDescription: (hash) => `Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: () => invalidateStakingQueries(account),
+      onError: parseSorobanError,
+    },
+  )
 }
 
-export async function depositGM(
-  _account: string,
-  poolName: string,
-  _amountUsd: number,
-): Promise<string> {
-  // TODO: Call ExchangeRouter.createDeposit({ market, longTokenAmount, shortTokenAmount })
-  //   Deposit is two-sided — user provides long + short tokens in current pool ratio
-  const toastId = toast.loading(`Depositing into ${poolName}…`)
-  await fakeTxDelay()
-  toast.success("GM deposit submitted", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+export async function unstakeSO4(account: string, amountSO4: number): Promise<string> {
+  if (!isValidAccount(account)) throw new Error("Connect your wallet before unstaking.")
+  if (!(amountSO4 > 0)) throw new Error("Enter an amount of SO4 to unstake.")
+
+  const amount = toSorobanAmount(amountSO4, SO4_DECIMALS)
+
+  return submitTx(
+    async () => {
+      const tx = await buildUnstakeSO4Transaction(account, amount)
+      return prepareAndSign(tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage: `Unstaking ${amountSO4} SO4...`,
+      successMessage: "SO4 unstaked successfully",
+      successDescription: (hash) =>
+        `Tokens may be subject to an unbonding period before withdrawal. Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: () => invalidateStakingQueries(account),
+      onError: parseSorobanError,
+    },
+  )
 }
 
-export async function withdrawGM(
-  _account: string,
-  poolName: string,
-  _gmAmount: number,
-): Promise<string> {
-  // TODO: Call ExchangeRouter.createWithdrawal({ market, marketTokenAmount })
-  const toastId = toast.loading(`Withdrawing from ${poolName}…`)
-  await fakeTxDelay()
-  toast.success("GM withdrawal submitted", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+export async function depositGM(account: string, poolName: string, amountUsd: number): Promise<string> {
+  if (!isValidAccount(account)) throw new Error("Connect your wallet before depositing.")
+  if (!(amountUsd > 0)) throw new Error("Enter an amount to deposit.")
+
+  const pool = GM_POOLS.find(
+    (p) => p.name === poolName || p.id === poolName || p.marketAddress === poolName,
+  )
+  if (!pool) throw new Error(`Unknown GM pool: ${poolName}`)
+
+  // Deposit the full amount as the long token; short side is left to rebalancing.
+  const longTokenAmount = toSorobanAmount(amountUsd, GM_TOKEN_DECIMALS)
+
+  let expectedGm: bigint | null = null
+
+  return submitTx(
+    async () => {
+      const built = await buildCreateDepositTransaction({
+        caller: account,
+        market: pool.marketAddress,
+        longTokenAmount,
+        shortTokenAmount: 0n,
+      })
+      expectedGm = built.expectedGm
+      return prepareAndSign(built.tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage: `Depositing into ${pool.name}...`,
+      successMessage: "GM deposit submitted",
+      successDescription: (hash) =>
+        expectedGm !== null
+          ? `~${expectedGm.toString()} GM expected | Tx: ${hash.slice(0, 8)}...`
+          : `Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: () =>
+        queryClient.invalidateQueries({ queryKey: queryKeys.earn.gmPoolData(pool.marketAddress, account) }),
+      onError: parseSorobanError,
+    },
+  )
 }
 
-export async function depositGLV(
-  _account: string,
-  vaultName: string,
-  _amountUsd: number,
-): Promise<string> {
-  // TODO: Call GlvRouter.createDeposit({ glv, longTokenAmount, shortTokenAmount })
-  //   GLV deposits route through underlying GM pools — vault picks the optimal pool
-  const toastId = toast.loading(`Depositing into ${vaultName}…`)
-  await fakeTxDelay()
-  toast.success("GLV deposit submitted", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+export async function withdrawGM(account: string, poolName: string, gmAmount: number): Promise<string> {
+  if (!isValidAccount(account)) throw new Error("Connect your wallet before withdrawing.")
+  if (!(gmAmount > 0)) throw new Error("Enter an amount of GM to withdraw.")
+
+  const pool = GM_POOLS.find(
+    (p) => p.name === poolName || p.id === poolName || p.marketAddress === poolName,
+  )
+  if (!pool) throw new Error(`Unknown GM pool: ${poolName}`)
+
+  const withdrawalAmount = toSorobanAmount(gmAmount, GM_TOKEN_DECIMALS)
+  let expectedLongTokens: bigint | null = null
+  let expectedShortTokens: bigint | null = null
+
+  return submitTx(
+    async () => {
+      const built = await buildCreateWithdrawalTransaction({
+        caller: account,
+        market: pool.marketAddress,
+        marketTokenAmount: withdrawalAmount,
+      })
+      expectedLongTokens = built.expectedLongTokens
+      expectedShortTokens = built.expectedShortTokens
+      return prepareAndSign(built.tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage: `Withdrawing from ${pool.name}...`,
+      successMessage: "GM withdrawal submitted",
+      successDescription: (hash) =>
+        expectedLongTokens !== null && expectedShortTokens !== null
+          ? `~${expectedLongTokens.toString()} long + ~${expectedShortTokens.toString()} short expected | Tx: ${hash.slice(0, 8)}...`
+          : `Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: () =>
+        queryClient.invalidateQueries({ queryKey: queryKeys.earn.gmPoolData(pool.marketAddress, account) }),
+      onError: parseSorobanError,
+    },
+  )
 }
 
-export async function withdrawGLV(
-  _account: string,
-  vaultName: string,
-  _glvAmount: number,
-): Promise<string> {
-  // TODO: Call GlvRouter.createWithdrawal({ glv, glvTokenAmount })
-  const toastId = toast.loading(`Withdrawing from ${vaultName}…`)
-  await fakeTxDelay()
-  toast.success("GLV withdrawal submitted", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+export async function depositGLV(account: string, vaultName: string, amountUsd: number): Promise<string> {
+  if (!isValidAccount(account)) throw new Error("Connect your wallet before depositing.")
+  if (!(amountUsd > 0)) throw new Error("Enter an amount to deposit.")
+
+  const vault = GLV_VAULTS.find(
+    (entry) =>
+      entry.id === vaultName ||
+      entry.name === vaultName ||
+      `${entry.name} [${entry.displayPair}]` === vaultName,
+  )
+  if (!vault) throw new Error(`Unknown GLV vault: ${vaultName}`)
+
+  const depositAmount = toSorobanAmount(amountUsd, GLV_TOKEN_DECIMALS)
+  return createGlvDeposit({
+    account,
+    glvAddress: vault.id,
+    depositAmount,
+  })
 }
 
-export async function claimRewards(_account: string): Promise<string> {
-  // TODO: Call StakingRouter.claimRewards() on Soroban
-  //   Sends esSO4 + WETH fee rewards to wallet in a single multicall tx
-  const toastId = toast.loading("Claiming rewards…")
-  await fakeTxDelay(1000)
-  toast.success("Rewards claimed", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+export async function withdrawGLV(account: string, vaultName: string, glvAmount: number): Promise<string> {
+  if (!isValidAccount(account)) throw new Error("Connect your wallet before withdrawing.")
+  if (!(glvAmount > 0)) throw new Error("Enter an amount of GLV to withdraw.")
+
+  const vault = GLV_VAULTS.find(
+    (entry) =>
+      entry.id === vaultName ||
+      entry.name === vaultName ||
+      `${entry.name} [${entry.displayPair}]` === vaultName,
+  )
+  if (!vault) throw new Error(`Unknown GLV vault: ${vaultName}`)
+
+  const withdrawalAmount = toSorobanAmount(glvAmount, GLV_TOKEN_DECIMALS)
+  return createGlvWithdrawal({
+    account,
+    glvAddress: vault.id,
+    withdrawalAmount,
+  })
 }
 
-export async function compoundRewards(_account: string): Promise<string> {
-  // TODO: Batch in one tx: claimRewards() → stakeEsSO4(amount) → stakeMPs()
-  //   Compounding increases staking power without selling any tokens
-  const toastId = toast.loading("Compounding rewards…")
-  await fakeTxDelay(1200)
-  toast.success("Rewards compounded", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+export async function claimRewards(account: string): Promise<string> {
+  if (!isValidAccount(account)) throw new Error("Connect your wallet before claiming rewards.")
+
+  return submitTx(
+    async () => {
+      const tx = await buildClaimRewardsTransaction(account)
+      return prepareAndSign(tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage: "Claiming rewards...",
+      successMessage: "Rewards claimed successfully",
+      successDescription: (hash) => `Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: () => invalidateStakingQueries(account),
+      onError: parseSorobanError,
+    },
+  )
 }
 
-export async function vestEsSO4(_account: string, _amount: number): Promise<string> {
-  // TODO: Call VestingRouter.depositForVesting(amount)
-  //   Locks esSO4 for 12-month linear vesting → converts 1:1 to SO4 on maturity
-  const toastId = toast.loading("Starting esSO4 vesting…")
-  await fakeTxDelay()
-  toast.success("Vesting started", { id: toastId, description: "Tx: DUMMY (not real)" })
-  return "DUMMY_TX_HASH"
+export async function compoundRewards(account: string): Promise<string> {
+  if (!isValidAccount(account)) throw new Error("Connect your wallet before compounding rewards.")
+
+  return submitTx(
+    async () => {
+      const tx = await buildCompoundTransaction(account)
+      return prepareAndSign(tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage: "Compounding rewards...",
+      successMessage: "Rewards compounded successfully",
+      successDescription: (hash) => `Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: () => invalidateStakingQueries(account),
+      onError: parseSorobanError,
+    },
+  )
+}
+
+export async function vestEsSO4(account: string, amount: number): Promise<string> {
+  if (!isValidAccount(account)) throw new Error("Connect your wallet before vesting.")
+  if (!(amount > 0)) throw new Error("Enter an amount of esSO4 to vest.")
+
+  const vestAmount = toSorobanAmount(amount, SO4_DECIMALS)
+
+  return submitTx(
+    async () => {
+      const tx = await buildDepositForVestingTransaction(account, vestAmount)
+      return prepareAndSign(tx, walletKit, NETWORK.networkPassphrase)
+    },
+    {
+      loadingMessage: `Starting vesting for ${amount} esSO4...`,
+      successMessage: "Vesting started successfully",
+      successDescription: (hash) => `Tx: ${hash.slice(0, 8)}...`,
+      onSuccess: () => invalidateStakingQueries(account),
+      onError: parseSorobanError,
+    },
+  )
 }
 
 export function buySO4(): void {
-  // TODO: Route to DEX swap or protocol buy-back mechanism
   toast.info("SO4 purchase coming soon", { description: "DEX integration in progress" })
 }

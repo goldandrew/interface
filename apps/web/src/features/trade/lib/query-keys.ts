@@ -1,6 +1,9 @@
 // Centralized TanStack Query key factory — keeps cache invalidation consistent
 
-export const queryKeys = {
+const keys = {
+  // Available markets list (hydrated with on-chain isDisabled flag)
+  markets: () => ["markets"] as const,
+
   // Token prices from oracle keeper (or Stellar oracle)
   tokenPrices: (chainId: string) => ["tokenPrices", chainId] as const,
 
@@ -13,6 +16,7 @@ export const queryKeys = {
 
   // On-chain market state: pool amounts, OI, rates
   marketsInfo: (chainId: string) => ["marketsInfo", chainId] as const,
+  openInterest: (marketAddress: string) => ["openInterest", marketAddress] as const,
 
   // User open positions
   positions: (chainId: string, account: string) =>
@@ -22,7 +26,27 @@ export const queryKeys = {
   orders: (chainId: string, account: string) =>
     ["orders", chainId, account] as const,
 
+  // Fee parameters from DataStore
+  feeConfig: (chainId: string, marketAddress: string) =>
+    ["feeConfig", chainId, marketAddress] as const,
+
+  // Oracle circuit breaker flag from DataStore
+  circuitBreaker: (symbol: string) => ["circuitBreaker", symbol] as const,
+
   // Trade history
   tradeHistory: (chainId: string, account: string, page: number) =>
     ["tradeHistory", chainId, account, page] as const,
+
+  // Funding rate + next epoch timestamp
+  fundingRate: (chainId: string, marketAddress: string) =>
+    ["fundingRate", chainId, marketAddress] as const,
+
+  // User token balances (invalidated after swap / deposit / withdraw)
+  tokenBalances: (chainId: string, account: string) =>
+    ["tokenBalances", chainId, account] as const,
+}
+
+export const queryKeys = {
+  ...keys,
+  trade: keys,
 }

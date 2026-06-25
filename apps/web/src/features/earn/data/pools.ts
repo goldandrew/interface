@@ -1,5 +1,8 @@
+import { POOL_MARKETS } from "@/features/pools/data/markets"
+
 export type GmPool = {
   id: string
+  marketAddress: string
   name: string
   longToken: string
   shortToken: string
@@ -14,49 +17,25 @@ export type GlvVault = {
   id: string
   name: string
   displayPair: string
-  underlyingPools: string[]
+  underlyingPools: Array<string>
   apy: number
   tvlUsd: number
 }
 
-// TODO: Replace static APY + TVL with live data from:
-//   - PerformanceTracker.getAnnualizedReturn(poolAddress, "30d") on Soroban
-//   - SyntheticsReader.getMarketTokenPrice × totalSupply for TVL
-export const GM_POOLS: GmPool[] = [
-  {
-    id: "gm-btc-usdc",
-    name: "BTC/USD",
-    longToken: "BTC",
-    shortToken: "USDC",
-    apy: 18.24,
-    tvlUsd: 12_400_000,
-    longPct: 50,
-    shortPct: 50,
-  },
-  {
-    id: "gm-eth-usdc",
-    name: "ETH/USD",
-    longToken: "ETH",
-    shortToken: "USDC",
-    apy: 14.87,
-    tvlUsd: 8_750_000,
-    longPct: 50,
-    shortPct: 50,
-  },
-  {
-    id: "gm-xlm-usdc",
-    name: "XLM/USD",
-    longToken: "XLM",
-    shortToken: "USDC",
-    apy: 22.31,
-    tvlUsd: 2_100_000,
-    longPct: 48,
-    shortPct: 52,
-  },
-]
+export const GM_POOLS: Array<GmPool> = POOL_MARKETS.map((market) => ({
+  id: `gm-${market.label.toLowerCase().replace("/", "-")}`,
+  marketAddress: market.marketToken,
+  name: market.displayName,
+  longToken: market.longSymbol,
+  shortToken: market.shortSymbol,
+  apy: 0,
+  tvlUsd: 0,
+  longPct: 50,
+  shortPct: 50,
+}))
 
 // TODO: GLV vault APY aggregates underlying GM pool performance weighted by allocation
-export const GLV_VAULTS: GlvVault[] = [
+export const GLV_VAULTS: Array<GlvVault> = [
   {
     id: "glv-btc-usdc",
     name: "GLV",
