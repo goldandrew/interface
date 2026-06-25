@@ -332,4 +332,300 @@ describe("parseSorobanError", () => {
       })
     })
   })
+
+  describe("unknown and malformed errors return safe fallback", () => {
+    const FALLBACK_MESSAGE = "Transaction failed. Please try again."
+
+    describe("primitive types without error codes", () => {
+      it("returns fallback for null", () => {
+        expect(parseSorobanError(null)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for undefined", () => {
+        expect(parseSorobanError(undefined)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for empty string", () => {
+        expect(parseSorobanError("")).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for whitespace-only string", () => {
+        expect(parseSorobanError("   ")).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError("\n\t  ")).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for number", () => {
+        expect(parseSorobanError(0)).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError(42)).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError(-1)).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError(3.14)).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError(NaN)).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError(Infinity)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for boolean", () => {
+        expect(parseSorobanError(true)).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError(false)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for BigInt", () => {
+        expect(parseSorobanError(BigInt(123))).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for Symbol", () => {
+        expect(parseSorobanError(Symbol("error"))).toBe(FALLBACK_MESSAGE)
+      })
+    })
+
+    describe("empty and trivial collections", () => {
+      it("returns fallback for empty array", () => {
+        expect(parseSorobanError([])).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for array of empty values", () => {
+        expect(parseSorobanError([null, undefined, ""])).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError([0, false, []])).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for empty object", () => {
+        expect(parseSorobanError({})).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for object with null/undefined values", () => {
+        expect(parseSorobanError({ a: null, b: undefined })).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for nested empty structures", () => {
+        expect(parseSorobanError({ data: { errors: [] } })).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError({ response: { data: {} } })).toBe(FALLBACK_MESSAGE)
+      })
+    })
+
+    describe("malformed JSON strings", () => {
+      it("returns fallback for invalid JSON (unclosed brace)", () => {
+        expect(parseSorobanError('{"error": "something"')).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for invalid JSON (unclosed bracket)", () => {
+        expect(parseSorobanError('["error", "data"')).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for invalid JSON (trailing comma)", () => {
+        expect(parseSorobanError('{"error": "msg",}')).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for invalid JSON (single quotes)", () => {
+        expect(parseSorobanError("{'error': 'message'}")).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for invalid JSON (unquoted keys)", () => {
+        expect(parseSorobanError('{error: "message"}')).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for JSON-like string that doesn't parse", () => {
+        expect(parseSorobanError('{{invalid}}')).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError('[[]')).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError('{]')).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for nested malformed JSON", () => {
+        const error = {
+          response: {
+            data: '{"error": {"message": "unclosed',
+          },
+        }
+        expect(parseSorobanError(error)).toBe(FALLBACK_MESSAGE)
+      })
+    })
+
+    describe("circular references", () => {
+      it("returns fallback for circular object without error codes", () => {
+        const obj: any = { message: "unknown error" }
+        obj.self = obj
+        expect(parseSorobanError(obj)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for circular array", () => {
+        const arr: any[] = [1, 2, 3]
+        arr.push(arr)
+        expect(parseSorobanError(arr)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for mutually circular objects", () => {
+        const obj1: any = { name: "first" }
+        const obj2: any = { name: "second" }
+        obj1.ref = obj2
+        obj2.ref = obj1
+        expect(parseSorobanError(obj1)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for deeply circular structure", () => {
+        const root: any = { level: 0 }
+        let current = root
+        for (let i = 1; i < 5; i++) {
+          current.next = { level: i }
+          current = current.next
+        }
+        current.next = root // Create cycle
+        expect(parseSorobanError(root)).toBe(FALLBACK_MESSAGE)
+      })
+    })
+
+    describe("unknown contract-like text", () => {
+      it("returns fallback for generic error message", () => {
+        expect(parseSorobanError("Something went wrong")).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for contract-like error without known code", () => {
+        expect(parseSorobanError("Error: UNKNOWN_CONTRACT_ERROR")).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for Soroban-like error with unknown code", () => {
+        expect(parseSorobanError("host invocation failed: UNKNOWN_ERROR_CODE")).toBe(
+          FALLBACK_MESSAGE,
+        )
+      })
+
+      it("returns fallback for RPC-like error with unknown code", () => {
+        expect(parseSorobanError("tx_unknown_error_type")).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for error with partial matches", () => {
+        expect(parseSorobanError("tx_something_else")).toBe(FALLBACK_MESSAGE)
+        expect(parseSorobanError("INSUFFICIENT_SOMETHING_ELSE")).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for Error instance with unknown message", () => {
+        const error = new Error("Unknown blockchain error occurred")
+        expect(parseSorobanError(error)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for nested unknown errors", () => {
+        const error = {
+          response: {
+            data: JSON.stringify({
+              error: { code: "UNKNOWN_ERROR", message: "Contract execution failed" },
+            }),
+          },
+        }
+        expect(parseSorobanError(error)).toBe(FALLBACK_MESSAGE)
+      })
+    })
+
+    describe("edge cases that should not throw", () => {
+      it("handles function without throwing", () => {
+        expect(parseSorobanError(() => "error")).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles class instance without throwing", () => {
+        class CustomError {
+          message = "unknown"
+        }
+        expect(parseSorobanError(new CustomError())).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles Date object without throwing", () => {
+        expect(parseSorobanError(new Date())).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles RegExp without throwing", () => {
+        expect(parseSorobanError(/error/)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles Map without throwing", () => {
+        const map = new Map([["error", "unknown"]])
+        expect(parseSorobanError(map)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles Set without throwing", () => {
+        const set = new Set(["unknown", "error"])
+        expect(parseSorobanError(set)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles deeply nested null/undefined chain", () => {
+        expect(parseSorobanError({ a: { b: { c: { d: null } } } })).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles Error with null cause", () => {
+        const error = new Error("message", { cause: null })
+        expect(parseSorobanError(error)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles Error with undefined cause", () => {
+        const error = new Error("message", { cause: undefined })
+        expect(parseSorobanError(error)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles Error chain with no recognizable codes", () => {
+        const cause3 = new Error("Third level error")
+        const cause2 = new Error("Second level error", { cause: cause3 })
+        const cause1 = new Error("First level error", { cause: cause2 })
+        expect(parseSorobanError(cause1)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles very long string without known codes", () => {
+        const longString = "x".repeat(10000)
+        expect(parseSorobanError(longString)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles special characters and unicode", () => {
+        expect(parseSorobanError("エラー 错误 ошибка 🚫")).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("handles strings with control characters", () => {
+        expect(parseSorobanError("error\x00\x01\x02")).toBe(FALLBACK_MESSAGE)
+      })
+    })
+
+    describe("arrays with unknown content", () => {
+      it("returns fallback for array of unknown strings", () => {
+        expect(parseSorobanError(["error1", "error2", "error3"])).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for array of Error instances without known codes", () => {
+        const errors = [new Error("Unknown 1"), new Error("Unknown 2"), new Error("Unknown 3")]
+        expect(parseSorobanError(errors)).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for mixed array of primitives", () => {
+        expect(parseSorobanError([1, "error", true, null, { message: "unknown" }])).toBe(
+          FALLBACK_MESSAGE,
+        )
+      })
+
+      it("returns fallback for nested arrays without known codes", () => {
+        expect(parseSorobanError([[[["error"]]]])).toBe(FALLBACK_MESSAGE)
+      })
+    })
+
+    describe("objects with unknown content", () => {
+      it("returns fallback for object with random properties", () => {
+        expect(parseSorobanError({ foo: "bar", baz: 123 })).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for object mimicking error structure but with unknown codes", () => {
+        expect(
+          parseSorobanError({
+            error: { code: "UNKNOWN", message: "Something failed" },
+          }),
+        ).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for response-like object without known errors", () => {
+        expect(
+          parseSorobanError({
+            response: { status: 500, data: "Internal server error" },
+          }),
+        ).toBe(FALLBACK_MESSAGE)
+      })
+
+      it("returns fallback for deeply nested object without known codes", () => {
+        expect(
+          parseSorobanError({
+            level1: { level2: { level3: { level4: { error: "unknown" } } } },
+          }),
+        ).toBe(FALLBACK_MESSAGE)
+      })
+    })
+  })
 })
